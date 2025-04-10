@@ -1,4 +1,4 @@
-// Bluetooth.js - Bluetooth device management (updated for Noble implementation)
+// Bluetooth.js - Bluetooth device management
 
 class BluetoothManager {
   constructor() {
@@ -13,7 +13,7 @@ class BluetoothManager {
     this.isScanning = false;
     this.connectedDevices = [];
     this.availableDevices = [];
-    this.discoveredDevices = {}; // Store discovered devices by ID
+    this.discoveredDevices = {}; // Store discovered devices by MAC
     
     // Initialize
     this.init();
@@ -51,7 +51,7 @@ class BluetoothManager {
     
     socket.on('bluetooth:device_found', (device) => {
       // Add newly discovered device to the list
-      this.discoveredDevices[device.id] = device;
+      this.discoveredDevices[device.mac] = device;
       
       // Update the UI if we're actively scanning
       if (this.isScanning) {
@@ -61,7 +61,7 @@ class BluetoothManager {
     
     socket.on('bluetooth:device_disconnected', (data) => {
       // Remove from connected devices
-      this.connectedDevices = this.connectedDevices.filter(device => device.id !== data.id);
+      this.connectedDevices = this.connectedDevices.filter(device => device.mac !== data.mac);
       this.renderConnectedDevices();
       
       player.showNotification('Device disconnected');
@@ -131,7 +131,7 @@ class BluetoothManager {
         
         // Update discovered devices cache
         this.availableDevices.forEach(device => {
-          this.discoveredDevices[device.id] = device;
+          this.discoveredDevices[device.mac] = device;
         });
         
         this.renderAvailableDevices();
@@ -160,7 +160,7 @@ class BluetoothManager {
           <div class="device-mac">${device.mac || 'Unknown MAC'}</div>
         </div>
         <div class="device-actions">
-          <button class="icon-btn disconnect-btn" title="Disconnect" data-id="${device.id}">
+          <button class="icon-btn disconnect-btn" title="Disconnect" data-mac="${device.mac}">
             <i class="fas fa-unlink"></i>
           </button>
         </div>
@@ -190,8 +190,8 @@ class BluetoothManager {
     }
     
     // Filter out already connected devices
-    const connectedIds = this.connectedDevices.map(d => d.id);
-    const availableOnly = this.availableDevices.filter(d => !connectedIds.includes(d.id));
+    const connectedMacs = this.connectedDevices.map(d => d.mac);
+    const availableOnly = this.availableDevices.filter(d => !connectedMacs.includes(d.mac));
     
     if (availableOnly.length === 0) {
       this.availableDevicesEl.innerHTML = '<div class="empty">No additional devices found. Try scanning again.</div>';
@@ -216,7 +216,7 @@ class BluetoothManager {
           <div class="device-mac">${device.mac || 'Unknown MAC'}</div>
         </div>
         <div class="device-actions">
-          <button class="icon-btn connect-btn" title="Connect" data-id="${device.id}">
+          <button class="icon-btn connect-btn" title="Connect" data-mac="${device.mac}">
             <i class="fas fa-link"></i>
           </button>
         </div>
@@ -288,12 +288,12 @@ class BluetoothManager {
       .then(response => response.json())
       .then(data => {
         if (!data.success) {
-          player.showNotification(data.message);
+          player.showNotification(data.message || 'Error starting scan');
           this.isScanning = false;
           this.updateUI();
         }
         
-        // Set a timeout to refresh the device list after 20 seconds
+        // Set a timeout to refresh the device list after 10 seconds
         // in case we don't get the scan_complete event
         setTimeout(() => {
           if (this.isScanning) {
@@ -301,7 +301,7 @@ class BluetoothManager {
             this.updateUI();
             this.loadAvailableDevices();
           }
-        }, 20000);
+        }, 10000);
       })
       .catch(error => {
         console.error('Error scanning for devices:', error);
@@ -312,31 +312,40 @@ class BluetoothManager {
   }
   
   connectDevice(device) {
-    if (!device || !device.id) return;
+    if (!device || !device.mac) {
+      console.error('Cannot connect: No MAC address provided');
+      return;
+    }
     
     // Show connecting status
-    const deviceItems = this.availableDevicesEl.querySelectorAll('.device-item');
-    deviceItems.forEach(item => {
-      const connectBtn = item.querySelector(`.connect-btn[data-id="${device.id}"]`);
-      if (connectBtn) {
-        connectBtn.disabled = true;
-        connectBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-      }
+    const connectButtons = document.querySelectorAll(`.connect-btn[data-mac="${device.mac}"]`);
+    connectButtons.forEach(btn => {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
     });
+    
+    console.log(`Attempting to connect to device: ${device.mac}`);
     
     fetch('/api/bluetooth/connect', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ id: device.id })
+      body: JSON.stringify({ mac: device.mac })
     })
-      .then(response => response.json())
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP error ${response.status}`);
+        }
+        return response.json();
+      })
       .then(data => {
+        console.log('Connection response:', data);
+        
         if (data.success) {
           player.showNotification(`Connected to ${device.name || 'device'}`);
-          // Refresh device lists
-          this.refreshDeviceLists();
+          // Refresh device lists after a brief delay
+          setTimeout(() => this.refreshDeviceLists(), 1000);
         } else {
           player.showNotification(data.message || `Failed to connect to ${device.name || 'device'}`);
           this.updateUI();
@@ -350,16 +359,13 @@ class BluetoothManager {
   }
   
   disconnectDevice(device) {
-    if (!device || !device.id) return;
+    if (!device || !device.mac) return;
     
     // Show disconnecting status
-    const deviceItems = this.connectedDevicesEl.querySelectorAll('.device-item');
-    deviceItems.forEach(item => {
-      const disconnectBtn = item.querySelector(`.disconnect-btn[data-id="${device.id}"]`);
-      if (disconnectBtn) {
-        disconnectBtn.disabled = true;
-        disconnectBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-      }
+    const disconnectButtons = document.querySelectorAll(`.disconnect-btn[data-mac="${device.mac}"]`);
+    disconnectButtons.forEach(btn => {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
     });
     
     fetch('/api/bluetooth/disconnect', {
@@ -367,14 +373,14 @@ class BluetoothManager {
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ id: device.id })
+      body: JSON.stringify({ mac: device.mac })
     })
       .then(response => response.json())
       .then(data => {
         if (data.success) {
           player.showNotification(`Disconnected from ${device.name || 'device'}`);
-          // Refresh device lists
-          this.refreshDeviceLists();
+          // Refresh device lists after a brief delay
+          setTimeout(() => this.refreshDeviceLists(), 1000);
         } else {
           player.showNotification(data.message || `Failed to disconnect from ${device.name || 'device'}`);
           this.updateUI();
