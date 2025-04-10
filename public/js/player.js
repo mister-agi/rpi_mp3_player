@@ -194,6 +194,43 @@ class AudioPlayer {
             }
         });
 
+        // Media key support for headphones and bluetooth devices
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.setActionHandler('play', () => {
+                this.play();
+            });
+            
+            navigator.mediaSession.setActionHandler('pause', () => {
+                this.pause();
+            });
+            
+            navigator.mediaSession.setActionHandler('previoustrack', () => {
+                this.playPrevious();
+            });
+            
+            navigator.mediaSession.setActionHandler('nexttrack', () => {
+                this.playNext();
+            });
+        }
+
+        // Legacy media keys event (for broader device support)
+        window.addEventListener('mediaplaypause', () => {
+            if (this.isPlaying) {
+                this.pause();
+            } else {
+                this.play();
+            }
+        });
+        
+        // Listen for play/pause events from headphone buttons
+        window.addEventListener('mediaplay', () => {
+            this.play();
+        });
+        
+        window.addEventListener('mediapause', () => {
+            this.pause();
+        });
+
         // Bluetooth button
         document.getElementById('bluetoothBtn').addEventListener('click', () => {
             this.showView('bluetoothView');
@@ -236,6 +273,15 @@ class AudioPlayer {
 
         // Auto play
         this.play();
+        
+        // Update MediaSession metadata for headphone control display
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: track.title || 'Unknown Track',
+                artist: track.artist || 'Unknown Artist',
+                album: track.album || 'Unknown Album'
+            });
+        }
     }
 
     play() {
